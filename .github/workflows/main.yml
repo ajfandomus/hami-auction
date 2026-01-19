@@ -26,5 +26,5 @@ jobs:
           FLORIDAY_PASSWORD: ${{ secrets.FLORIDAY_PASSWORD }}
           FLORIDAY_TARGET_PAGES: ${{ secrets.FLORIDAY_TARGET_PAGES }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-           FLORIDAY_SERVICE_ACCOUNT: ${{ secrets.FLORIDAY_SERVICE_ACCOUNT }}
+          FLORIDAY_SERVICE_ACCOUNT: ${{ secrets.FLORIDAY_SERVICE_ACCOUNT }}
         run: node Scraper.js
