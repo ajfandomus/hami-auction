@@ -64,7 +64,7 @@ function formatRuntime(ms) {
     //     credentials: serviceAccount,
     //     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     // });
-const serviceAccount = JSON.parse(process.env.FLRIDAY_SERVICE_ACCOUNT);
+const serviceAccount = JSON.parse(process.env.FLORIDAY_SERVICE_ACCOUNT);
 
 const auth = new google.auth.GoogleAuth({
     credentials: serviceAccount,
@@ -300,4 +300,5 @@ try {
         if (browser) await browser.close();
     }
 })();
+
 
