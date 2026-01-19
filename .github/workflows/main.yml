@@ -1,30 +1,26 @@
-name: Run Floriday Scraper
-
-on:
-  schedule:
-    - cron: '0 6 * * *' # runs daily at 6 AM UTC
-  workflow_dispatch: # allows manual trigger
-
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+    env:
+      FLORIDAY_EMAIL: ${{ secrets.FLORIDAY_EMAIL }}
+      FLORIDAY_PASSWORD: ${{ secrets.FLORIDAY_PASSWORD }}
+      FLORIDAY_TARGET_PAGES: ${{ secrets.FLORIDAY_TARGET_PAGES }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      FLORIDAY_SERVICE_ACCOUNT: ${{ secrets.FLORIDAY_SERVICE_ACCOUNT }}
 
-      - name: Set up Node.js
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '20' # or your Node version
+          node-version: 20
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run scraper
-        env:
-          FLORIDAY_EMAIL: ${{ secrets.FLORIDAY_EMAIL }}
-          FLORIDAY_PASSWORD: ${{ secrets.FLORIDAY_PASSWORD }}
-          FLORIDAY_TARGET_PAGES: ${{ secrets.FLORIDAY_TARGET_PAGES }}
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          FLORIDAY_SERVICE_ACCOUNT: ${{ secrets.FLORIDAY_SERVICE_ACCOUNT }}
+      - name: Install Playwright browsers
+        run: npx playwright install firefox
+
+      - name: Run Scraper
         run: node Scraper.js
