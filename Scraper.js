@@ -132,7 +132,7 @@ const auth = new google.auth.GoogleAuth({
             while (true) {
             console.log(`⏳ Scraping page ${pageNum}...`);
             await page.waitForSelector('div.css-8jxzx-gridContainer',{ timeout: 60000 });
-
+            await page.waitForTimeout(5000);
             const products = await page.$$(
                 'div.css-8jxzx-gridContainer > div:not([data-test])'
             );
@@ -300,5 +300,6 @@ try {
         if (browser) await browser.close();
     }
 })();
+
 
 
