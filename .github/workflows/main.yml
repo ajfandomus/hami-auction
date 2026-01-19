@@ -1,3 +1,11 @@
+name: Hami Auction Scraper
+
+on: 
+  workflow_dispatch:   # Manual trigger
+  push:
+    branches:
+      - main
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
