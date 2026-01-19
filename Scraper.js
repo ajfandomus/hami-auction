@@ -54,17 +54,22 @@ function formatRuntime(ms) {
     }
 
     // ---------- GOOGLE SHEETS ----------
-    const serviceAccountPath =
-        process.env.GOOGLE_SERVICE_ACCOUNT_JSON || 'service-account.json';
-    const serviceAccount = JSON.parse(
-        fs.readFileSync(path.resolve(__dirname, serviceAccountPath), 'utf8')
-    );
+    // const serviceAccountPath =
+    //     process.env.GOOGLE_SERVICE_ACCOUNT_JSON || 'service-account.json';
+    // const serviceAccount = JSON.parse(
+    //     fs.readFileSync(path.resolve(__dirname, serviceAccountPath), 'utf8')
+    // );
 
-    const auth = new google.auth.GoogleAuth({
-        credentials: serviceAccount,
-        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
+    // const auth = new google.auth.GoogleAuth({
+    //     credentials: serviceAccount,
+    //     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    // });
+const serviceAccount = JSON.parse(process.env.FLRIDAY_SERVICE_ACCOUNT);
 
+const auth = new google.auth.GoogleAuth({
+    credentials: serviceAccount,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+});
     const sheets = google.sheets({ version: 'v4', auth });
     const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
     const TARGET_SHEET_NAME = 'Hami-auction';
@@ -295,3 +300,4 @@ try {
         if (browser) await browser.close();
     }
 })();
+
