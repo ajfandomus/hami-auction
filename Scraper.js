@@ -60,9 +60,7 @@ function getTomorrowDateUAE() {
 async function openCalendarIfNeeded(page) {
     const visibleCalendar = page.locator('table.rdp-month_grid:visible').first();
 
-    if (await visibleCalendar.count()) {
-        return true;
-    }
+    if (await visibleCalendar.count()) return true;
 
     const exactOpeners = [
         'div.MuiPickersInputBase-root button.MuiIconButton-root',
@@ -78,9 +76,7 @@ async function openCalendarIfNeeded(page) {
                 await btn.click({ force: true });
                 await page.waitForTimeout(1500);
 
-                if (await visibleCalendar.count()) {
-                    return true;
-                }
+                if (await visibleCalendar.count()) return true;
             }
         } catch {}
     }
@@ -92,13 +88,30 @@ async function openCalendarIfNeeded(page) {
             await pickerRoot.click({ force: true });
             await page.waitForTimeout(1500);
 
-            if (await visibleCalendar.count()) {
-                return true;
-            }
+            if (await visibleCalendar.count()) return true;
         }
     } catch {}
 
     return false;
+}
+
+async function waitForGridRefresh(page, previousText = '') {
+    await page.waitForFunction(
+        ({ selector, previousText }) => {
+            const el = document.querySelector(selector);
+            if (!el) return false;
+            const txt = (el.textContent || '').trim();
+            if (!previousText) return txt.length > 0;
+            return txt !== previousText.trim();
+        },
+        {
+            selector: 'div.css-8jxzx-gridContainer > div:not([data-test])',
+            previousText,
+        },
+        { timeout: 20000 }
+    ).catch(async () => {
+        await page.waitForTimeout(5000);
+    });
 }
 
 async function selectTomorrowOrNextAvailable(page) {
@@ -146,22 +159,7 @@ async function selectTomorrowOrNextAvailable(page) {
     await targetBtn.scrollIntoViewIfNeeded().catch(() => {});
     await targetBtn.click({ force: true });
 
-    await page.waitForFunction(
-        ({ selector, previousText }) => {
-            const el = document.querySelector(selector);
-            if (!el) return false;
-            const txt = (el.textContent || '').trim();
-            return txt !== (previousText || '').trim();
-        },
-        {
-            selector: 'div.css-8jxzx-gridContainer > div:not([data-test])',
-            previousText: firstCardBefore,
-        },
-        { timeout: 20000 }
-    ).catch(async () => {
-        await page.waitForTimeout(5000);
-    });
-
+    await waitForGridRefresh(page, firstCardBefore);
     await page.waitForTimeout(2000);
 
     return nextAvailable;
@@ -205,22 +203,7 @@ async function goToPageNumber(page, pageNumber) {
     await pageBtn.scrollIntoViewIfNeeded().catch(() => {});
     await pageBtn.click({ force: true });
 
-    await page.waitForFunction(
-        ({ selector, previousText }) => {
-            const el = document.querySelector(selector);
-            if (!el) return false;
-            const txt = (el.textContent || '').trim();
-            return txt !== (previousText || '').trim();
-        },
-        {
-            selector: 'div.css-8jxzx-gridContainer > div:not([data-test])',
-            previousText: firstCardBefore,
-        },
-        { timeout: 20000 }
-    ).catch(async () => {
-        await page.waitForTimeout(5000);
-    });
-
+    await waitForGridRefresh(page, firstCardBefore);
     await page.waitForTimeout(2000);
 }
 
@@ -236,11 +219,18 @@ async function goToPageNumber(page, pageNumber) {
     }
 
     // ---------- GOOGLE SHEETS ----------
-    const serviceAccountPath =
-        process.env.GOOGLE_SERVICE_ACCOUNT_JSON || 'service-account.json';
-    const serviceAccount = JSON.parse(
-        fs.readFileSync(path.resolve(__dirname, serviceAccountPath), 'utf8')
-    );
+    // const serviceAccountPath =
+    //     process.env.GOOGLE_SERVICE_ACCOUNT_JSON || 'service-account.json';
+    // const serviceAccount = JSON.parse(
+    //     fs.readFileSync(path.resolve(__dirname, serviceAccountPath), 'utf8')
+    // );
+
+    // const auth = new google.auth.GoogleAuth({
+    //     credentials: serviceAccount,
+    //     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    // });
+
+    const serviceAccount = JSON.parse(process.env.FLORIDAY_SERVICE_ACCOUNT);
 
     const auth = new google.auth.GoogleAuth({
         credentials: serviceAccount,
@@ -254,7 +244,7 @@ async function goToPageNumber(page, pageNumber) {
     let browser;
 
     try {
-        browser = await firefox.launch({ headless: false, slowMo: 100 });
+        browser = await firefox.launch({ headless: true, slowMo: 100 });
         const context = await browser.newContext({
             viewport: { width: 1280, height: 800 },
         });
