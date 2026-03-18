@@ -334,31 +334,44 @@ async function goToNextPage(page) {
                         )
                         .catch(() => '');
 
-                    let price = '';
-                    let Quantity = '';
+               let price = '';
+let Quantity = '';
 
-                    try {
-                        const container = await product.$('div.MuiStack-root.css-8gnj0l');
+try {
+    const container = await product.$('div.MuiStack-root.css-8gnj0l');
 
-                        if (container) {
-                            const priceRaw = await container.$eval('b', el => el.innerText.trim());
-                            price = priceRaw.replace('€', '').trim();
+    if (!container) {
+        continue; // skip this product
+    }
 
-                            const qtyRaw = await container
-                                .$eval('span', el => el.innerText.trim())
-                                .catch(() => null);
+    // package span must exist
+    const qtyRaw = await container
+        .$eval('span', el => el.innerText.trim())
+        .catch(() => null);
 
-                            if (qtyRaw) {
-                                const qtyNumber = qtyRaw.match(/\d+/)?.[0] || '1';
-                                Quantity = `${qtyNumber} * €${price}`;
-                            } else {
-                                Quantity = `€${price}`;
-                            }
-                        }
-                    } catch {
-                        price = '';
-                        Quantity = '';
-                    }
+    if (!qtyRaw || !/packages?/i.test(qtyRaw)) {
+        continue; // skip product if no package text
+    }
+
+    const priceRaw = await container
+        .$eval('b', el => el.innerText.trim())
+        .catch(() => '');
+
+    if (!priceRaw) {
+        continue; // skip if no price too
+    }
+
+    price = priceRaw.replace('€', '').trim();
+
+    const qtyNumber = qtyRaw.match(/\d+/)?.[0];
+    if (!qtyNumber) {
+        continue; // skip if package number missing
+    }
+
+    Quantity = `${qtyNumber} * €${price}`;
+} catch {
+    continue; // skip broken product card
+}
 
                     const farmName = await product
                         .$eval(
