@@ -229,6 +229,7 @@ async function goToNextPage(page) {
     const sheets = google.sheets({ version: 'v4', auth });
     const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
     const TARGET_SHEET_NAME = 'Hami-auction';
+    const STATUS_SHEET_NAME = '_config';
 
     let browser;
 
@@ -258,7 +259,7 @@ async function goToNextPage(page) {
         // ---------- STATUS: RUNNING ----------
         await sheets.spreadsheets.values.update({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${TARGET_SHEET_NAME}!F16`,
+            range: `${STATUS_SHEET_NAME}!F16`,
             valueInputOption: 'RAW',
             requestBody: {
                 values: [[`🟡 Running... ${getUaeTimeFormatted()}`]],
@@ -480,14 +481,14 @@ async function goToNextPage(page) {
 
         await sheets.spreadsheets.values.update({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${TARGET_SHEET_NAME}!F16`,
+            range: `${STATUS_SHEET_NAME}!F16`,
             valueInputOption: 'RAW',
             requestBody: {
                 values: [[statusText]],
             },
         });
 
-        console.log(`📌 Status updated in F16: ${statusText}`);
+        console.log(`📌 Status updated in _config!F16: ${statusText}`);
         console.log(`🏁 Done in ${runtime}`);
     } catch (err) {
         console.error('❌ Scraping failed:', err);
@@ -503,11 +504,11 @@ async function goToNextPage(page) {
             });
             const sheets = google.sheets({ version: 'v4', auth });
             const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
-            const TARGET_SHEET_NAME = 'Hami-auction';
+            const STATUS_SHEET_NAME = '_config';
 
             await sheets.spreadsheets.values.update({
                 spreadsheetId: SPREADSHEET_ID,
-                range: `${TARGET_SHEET_NAME}!F16`,
+                range: `${STATUS_SHEET_NAME}!F16`,
                 valueInputOption: 'RAW',
                 requestBody: {
                     values: [[failText]],
