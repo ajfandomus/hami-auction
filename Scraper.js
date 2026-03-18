@@ -1,8 +1,6 @@
 const { google } = require('googleapis');
 const dotenv = require('dotenv');
 const { firefox } = require('playwright');
-const fs = require('fs');
-const path = require('path');
 
 dotenv.config();
 
@@ -58,84 +56,87 @@ function getTomorrowDateUAE() {
 }
 
 async function openCalendarIfNeeded(page) {
-    // If calendar already visible, do nothing
-    const alreadyVisible = await page.$('table.rdp-month_grid');
-    if (alreadyVisible) return true;
+    const visibleCalendar = page.locator('table.rdp-month_grid:visible').first();
 
-    // Try a few common selectors for date picker trigger
-    const triggerSelectors = [
-        'button[aria-label*="calendar" i]',
-        'button[aria-label*="date" i]',
-        'input[placeholder*="date" i]',
-        'input[aria-label*="date" i]',
-        '[data-testid*="date"]',
-        '[data-test*="date"]',
-        'svg[data-testid*="Calendar"]',
-        '.MuiInputAdornment-root button',
-    ];
-
-    for (const selector of triggerSelectors) {
-        try {
-            const el = await page.$(selector);
-            if (el && (await el.isVisible())) {
-                await el.click();
-                await page.waitForTimeout(1500);
-
-                const calendar = await page.$('table.rdp-month_grid');
-                if (calendar) return true;
-            }
-        } catch { }
+    if (await visibleCalendar.count()) {
+        return true;
     }
 
-    // One more attempt: click inside any visible date input
-    try {
-        const dateInput = await page.locator('input').filter({ hasText: '' }).first();
-        if (await dateInput.isVisible().catch(() => false)) {
-            await dateInput.click();
-            await page.waitForTimeout(1500);
+    // Exact opener from your snippet
+    const exactOpeners = [
+        'div.MuiPickersInputBase-root button.MuiIconButton-root',
+        'div.MuiPickersInputBase-root .MuiInputAdornment-positionEnd button',
+        'div[role="group"].MuiPickersInputBase-root button[type="button"]',
+    ];
 
-            const calendar = await page.$('table.rdp-month_grid');
-            if (calendar) return true;
+    for (const selector of exactOpeners) {
+        try {
+            const btn = page.locator(selector).first();
+            if (await btn.count()) {
+                await btn.click({ force: true });
+                await page.waitForTimeout(1200);
+
+                if (await visibleCalendar.count()) {
+                    return true;
+                }
+            }
+        } catch {}
+    }
+
+    // fallback: click picker root itself
+    try {
+        const pickerRoot = page.locator('div.MuiPickersInputBase-root').first();
+        if (await pickerRoot.count()) {
+            await pickerRoot.click({ force: true });
+            await page.waitForTimeout(1200);
+
+            if (await visibleCalendar.count()) {
+                return true;
+            }
         }
-    } catch { }
+    } catch {}
 
     return false;
 }
 
 async function selectTomorrowOrNextAvailable(page) {
-    const isOpened = await openCalendarIfNeeded(page);
-    if (!isOpened) {
-        throw new Error('❌ Could not open calendar');
+    const opened = await openCalendarIfNeeded(page);
+    if (!opened) {
+        throw new Error('❌ Could not open visible calendar');
     }
 
-    await page.waitForSelector('td.rdp-day', { timeout: 20000 });
+    const calendar = page.locator('table.rdp-month_grid:visible').first();
+    await calendar.waitFor({ state: 'visible', timeout: 15000 });
 
     const tomorrow = getTomorrowDateUAE();
     console.log(`📅 Tomorrow target (UAE): ${tomorrow}`);
 
-    const nextAvailable = await page.$$eval(
-        'td.rdp-day:not(.rdp-disabled)',
-        (days, tomorrowDate) => {
-            const validDates = days
-                .map(day => day.getAttribute('data-day'))
-                .filter(Boolean)
-                .sort();
+    const nextAvailable = await calendar.locator(
+        'td.rdp-day:not(.rdp-disabled):not(.rdp-hidden):not(.rdp-outside) button'
+    ).evaluateAll((buttons, tomorrowDate) => {
+        const dates = buttons
+            .map(btn => btn.closest('td'))
+            .filter(Boolean)
+            .map(td => td.getAttribute('data-day'))
+            .filter(Boolean)
+            .sort();
 
-            return validDates.find(d => d >= tomorrowDate) || null;
-        },
-        tomorrow
-    );
+        return dates.find(d => d >= tomorrowDate) || null;
+    }, tomorrow);
 
     if (!nextAvailable) {
-        throw new Error('❌ No available future dates found in calendar');
+        throw new Error('❌ No available future dates found');
     }
 
     console.log(`✅ Picking date: ${nextAvailable}`);
 
-    const btnSelector = `td[data-day="${nextAvailable}"]:not(.rdp-disabled) button`;
-    await page.waitForSelector(btnSelector, { timeout: 10000 });
-    await page.click(btnSelector);
-    await page.waitForTimeout(3000);
+    const targetBtn = calendar.locator(
+        `td.rdp-day[data-day="${nextAvailable}"]:not(.rdp-disabled):not(.rdp-hidden):not(.rdp-outside) button`
+    ).first();
+
+    await targetBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await targetBtn.click({ force: true });
+    await page.waitForTimeout(2500);
 
     return nextAvailable;
 }
@@ -204,7 +205,7 @@ async function selectTomorrowOrNextAvailable(page) {
                     await gotItBtn.click();
                     await page.waitForTimeout(5000);
                 }
-            } catch { }
+            } catch {}
 
             // ---------- PICK TOMORROW OR NEXT AVAILABLE DATE ----------
             try {
@@ -269,10 +270,7 @@ async function selectTomorrowOrNextAvailable(page) {
                         const container = await product.$('div.MuiStack-root.css-8gnj0l');
 
                         if (container) {
-                            const priceRaw = await container.$eval(
-                                'b',
-                                el => el.innerText.trim()
-                            );
+                            const priceRaw = await container.$eval('b', el => el.innerText.trim());
                             price = priceRaw.replace('€', '').trim();
 
                             const qtyRaw = await container
@@ -308,7 +306,7 @@ async function selectTomorrowOrNextAvailable(page) {
                                 await s.evaluate(el => el.textContent.trim())
                             );
                         }
-                    } catch { }
+                    } catch {}
 
                     let helper = 'N/A';
 
@@ -316,8 +314,7 @@ async function selectTomorrowOrNextAvailable(page) {
                         helper = await product.$eval(
                             'select.MuiNativeSelect-select',
                             select => {
-                                const selectedOption =
-                                    select.options[select.selectedIndex];
+                                const selectedOption = select.options[select.selectedIndex];
                                 return selectedOption
                                     ? selectedOption.textContent.trim()
                                     : 'N/A';
@@ -342,9 +339,7 @@ async function selectTomorrowOrNextAvailable(page) {
                     ]);
                 }
 
-                const nextBtn = await page.$(
-                    'button[aria-label="Go to next page"]'
-                );
+                const nextBtn = await page.$('button[aria-label="Go to next page"]');
 
                 if (!nextBtn || (await nextBtn.getAttribute('disabled')) !== null) {
                     break;
