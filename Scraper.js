@@ -255,6 +255,16 @@ async function goToNextPage(page) {
             await page.waitForTimeout(6000);
         }
 
+        // ---------- STATUS: RUNNING ----------
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${TARGET_SHEET_NAME}!F16`,
+            valueInputOption: 'RAW',
+            requestBody: {
+                values: [[`🟡 Running... ${getUaeTimeFormatted()}`]],
+            },
+        });
+
         // ---------- SCRAPING ----------
         const allProducts = [];
 
@@ -334,44 +344,43 @@ async function goToNextPage(page) {
                         )
                         .catch(() => '');
 
-               let price = '';
-let Quantity = '';
+                    let price = '';
+                    let Quantity = '';
 
-try {
-    const container = await product.$('div.MuiStack-root.css-8gnj0l');
+                    try {
+                        const container = await product.$('div.MuiStack-root.css-8gnj0l');
 
-    if (!container) {
-        continue; // skip this product
-    }
+                        if (!container) {
+                            continue;
+                        }
 
-    // package span must exist
-    const qtyRaw = await container
-        .$eval('span', el => el.innerText.trim())
-        .catch(() => null);
+                        const qtyRaw = await container
+                            .$eval('span', el => el.innerText.trim())
+                            .catch(() => null);
 
-    if (!qtyRaw || !/packages?/i.test(qtyRaw)) {
-        continue; // skip product if no package text
-    }
+                        if (!qtyRaw || !/packages?/i.test(qtyRaw)) {
+                            continue;
+                        }
 
-    const priceRaw = await container
-        .$eval('b', el => el.innerText.trim())
-        .catch(() => '');
+                        const priceRaw = await container
+                            .$eval('b', el => el.innerText.trim())
+                            .catch(() => '');
 
-    if (!priceRaw) {
-        continue; // skip if no price too
-    }
+                        if (!priceRaw) {
+                            continue;
+                        }
 
-    price = priceRaw.replace('€', '').trim();
+                        price = priceRaw.replace('€', '').trim();
 
-    const qtyNumber = qtyRaw.match(/\d+/)?.[0];
-    if (!qtyNumber) {
-        continue; // skip if package number missing
-    }
+                        const qtyNumber = qtyRaw.match(/\d+/)?.[0];
+                        if (!qtyNumber) {
+                            continue;
+                        }
 
-    Quantity = `${qtyNumber} * €${price}`;
-} catch {
-    continue; // skip broken product card
-}
+                        Quantity = `${qtyNumber} * €${price}`;
+                    } catch {
+                        continue;
+                    }
 
                     const farmName = await product
                         .$eval(
@@ -440,23 +449,6 @@ try {
         });
 
         await sheets.spreadsheets.values.update({
-            // ---------- STATUS UPDATE ----------
-const endTime = Date.now();
-const runtime = formatRuntime(endTime - startTime);
-const nowFormatted = getUaeTimeFormatted();
-
-const statusText = `✅ ${nowFormatted} — ${runtime}`;
-
-await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${TARGET_SHEET_NAME}!F16`,
-    valueInputOption: 'RAW',
-    requestBody: {
-        values: [[statusText]],
-    },
-});
-
-console.log(`📌 Status updated in F16: ${statusText}`);
             spreadsheetId: SPREADSHEET_ID,
             range: `${TARGET_SHEET_NAME}!A1`,
             valueInputOption: 'RAW',
@@ -480,9 +472,50 @@ console.log(`📌 Status updated in F16: ${statusText}`);
             },
         });
 
-        console.log(`🏁 Done in ${formatRuntime(Date.now() - startTime)}`);
+        // ---------- STATUS UPDATE ----------
+        const endTime = Date.now();
+        const runtime = formatRuntime(endTime - startTime);
+        const nowFormatted = getUaeTimeFormatted();
+        const statusText = `✅ ${nowFormatted} — ${runtime}`;
+
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${TARGET_SHEET_NAME}!F16`,
+            valueInputOption: 'RAW',
+            requestBody: {
+                values: [[statusText]],
+            },
+        });
+
+        console.log(`📌 Status updated in F16: ${statusText}`);
+        console.log(`🏁 Done in ${runtime}`);
     } catch (err) {
         console.error('❌ Scraping failed:', err);
+
+        try {
+            const failRuntime = formatRuntime(Date.now() - startTime);
+            const failText = `❌ ${getUaeTimeFormatted()} — ${failRuntime} — ${err.message}`;
+
+            const serviceAccount = JSON.parse(process.env.FLORIDAY_SERVICE_ACCOUNT);
+            const auth = new google.auth.GoogleAuth({
+                credentials: serviceAccount,
+                scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+            });
+            const sheets = google.sheets({ version: 'v4', auth });
+            const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
+            const TARGET_SHEET_NAME = 'Hami-auction';
+
+            await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEET_ID,
+                range: `${TARGET_SHEET_NAME}!F16`,
+                valueInputOption: 'RAW',
+                requestBody: {
+                    values: [[failText]],
+                },
+            });
+        } catch {}
+
+        process.exitCode = 1;
     } finally {
         if (browser) await browser.close();
     }
