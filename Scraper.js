@@ -1,6 +1,8 @@
 const { google } = require('googleapis');
 const dotenv = require('dotenv');
 const { firefox } = require('playwright');
+const fs = require('fs');
+const path = require('path');
 
 dotenv.config();
 
@@ -111,24 +113,30 @@ async function selectTomorrowOrNextAvailable(page) {
     const tomorrow = getTomorrowDateUAE();
     console.log(`📅 Tomorrow target (UAE): ${tomorrow}`);
 
-    const nextAvailable = await calendar.locator(
-        'td.rdp-day:not(.rdp-disabled):not(.rdp-hidden):not(.rdp-outside) button'
-    ).evaluateAll((buttons, tomorrowDate) => {
-        const dates = buttons
-            .map(btn => btn.closest('td'))
-            .filter(Boolean)
-            .map(td => td.getAttribute('data-day'))
-            .filter(Boolean)
-            .sort();
+    const nextAvailable = await calendar
+        .locator('td.rdp-day:not(.rdp-disabled):not(.rdp-hidden):not(.rdp-outside) button')
+        .evaluateAll((buttons, tomorrowDate) => {
+            const dates = buttons
+                .map(btn => btn.closest('td'))
+                .filter(Boolean)
+                .map(td => td.getAttribute('data-day'))
+                .filter(Boolean)
+                .sort();
 
-        return dates.find(d => d >= tomorrowDate) || null;
-    }, tomorrow);
+            return dates.find(d => d >= tomorrowDate) || null;
+        }, tomorrow);
 
     if (!nextAvailable) {
         throw new Error('❌ No available future dates found');
     }
 
     console.log(`✅ Picking date: ${nextAvailable}`);
+
+    const firstCardBefore = await page
+        .locator('div.css-8jxzx-gridContainer > div:not([data-test])')
+        .first()
+        .textContent()
+        .catch(() => '');
 
     const targetBtn = calendar.locator(
         `td.rdp-day[data-day="${nextAvailable}"]:not(.rdp-disabled):not(.rdp-hidden):not(.rdp-outside) button`
@@ -137,9 +145,83 @@ async function selectTomorrowOrNextAvailable(page) {
     await targetBtn.waitFor({ state: 'visible', timeout: 10000 });
     await targetBtn.scrollIntoViewIfNeeded().catch(() => {});
     await targetBtn.click({ force: true });
-    await page.waitForTimeout(3000);
+
+    await page.waitForFunction(
+        ({ selector, previousText }) => {
+            const el = document.querySelector(selector);
+            if (!el) return false;
+            const txt = (el.textContent || '').trim();
+            return txt !== (previousText || '').trim();
+        },
+        {
+            selector: 'div.css-8jxzx-gridContainer > div:not([data-test])',
+            previousText: firstCardBefore,
+        },
+        { timeout: 20000 }
+    ).catch(async () => {
+        await page.waitForTimeout(5000);
+    });
+
+    await page.waitForTimeout(2000);
 
     return nextAvailable;
+}
+
+async function detectTotalPages(page) {
+    try {
+        const pageNumbers = await page
+            .locator('button[aria-label^="Go to page "]')
+            .evaluateAll((buttons) => {
+                return buttons
+                    .map(btn => {
+                        const label = btn.getAttribute('aria-label') || '';
+                        const match = label.match(/Go to page (\d+)/i);
+                        return match ? Number(match[1]) : null;
+                    })
+                    .filter(Boolean);
+            });
+
+        if (pageNumbers.length) {
+            return Math.max(...pageNumbers);
+        }
+    } catch {}
+
+    return 1;
+}
+
+async function goToPageNumber(page, pageNumber) {
+    const firstCardBefore = await page
+        .locator('div.css-8jxzx-gridContainer > div:not([data-test])')
+        .first()
+        .textContent()
+        .catch(() => '');
+
+    const pageBtn = page.locator(`button[aria-label="Go to page ${pageNumber}"]`).first();
+
+    if (!(await pageBtn.count())) {
+        throw new Error(`Page button ${pageNumber} not found`);
+    }
+
+    await pageBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await pageBtn.click({ force: true });
+
+    await page.waitForFunction(
+        ({ selector, previousText }) => {
+            const el = document.querySelector(selector);
+            if (!el) return false;
+            const txt = (el.textContent || '').trim();
+            return txt !== (previousText || '').trim();
+        },
+        {
+            selector: 'div.css-8jxzx-gridContainer > div:not([data-test])',
+            previousText: firstCardBefore,
+        },
+        { timeout: 20000 }
+    ).catch(async () => {
+        await page.waitForTimeout(5000);
+    });
+
+    await page.waitForTimeout(2000);
 }
 
 (async () => {
@@ -154,7 +236,11 @@ async function selectTomorrowOrNextAvailable(page) {
     }
 
     // ---------- GOOGLE SHEETS ----------
-    const serviceAccount = JSON.parse(process.env.FLORIDAY_SERVICE_ACCOUNT);
+    const serviceAccountPath =
+        process.env.GOOGLE_SERVICE_ACCOUNT_JSON || 'service-account.json';
+    const serviceAccount = JSON.parse(
+        fs.readFileSync(path.resolve(__dirname, serviceAccountPath), 'utf8')
+    );
 
     const auth = new google.auth.GoogleAuth({
         credentials: serviceAccount,
@@ -168,7 +254,7 @@ async function selectTomorrowOrNextAvailable(page) {
     let browser;
 
     try {
-        browser = await firefox.launch({ headless: true, slowMo: 100 });
+        browser = await firefox.launch({ headless: false, slowMo: 100 });
         const context = await browser.newContext({
             viewport: { width: 1280, height: 800 },
         });
@@ -208,27 +294,47 @@ async function selectTomorrowOrNextAvailable(page) {
                 }
             } catch {}
 
-            // ---------- PICK TOMORROW OR NEXT AVAILABLE DATE ----------
+            // ---------- DATE SELECTION ----------
+            let selectedDate = null;
+
             try {
-                const selectedDate = await selectTomorrowOrNextAvailable(page);
+                selectedDate = await selectTomorrowOrNextAvailable(page);
                 console.log(`📌 Date selected successfully: ${selectedDate}`);
             } catch (err) {
-                console.log(`⚠️ Date selection skipped/failed: ${err.message}`);
+                console.log(`⚠️ Date selection failed: ${err.message}`);
+                console.log('⏭️ Skipping this target because no date was selected.');
+                continue;
             }
+
+            // only scrape after date selection succeeded
+            await page.waitForSelector('div.css-8jxzx-gridContainer', { timeout: 60000 });
+            await page.waitForTimeout(2000);
 
             // --- set page size to 96 ---
             const pageSizeSelect = await page.$('select.css-hh3ke9-pageSizeDropDownList');
             if (pageSizeSelect) {
                 await page.selectOption('select.css-hh3ke9-pageSizeDropDownList', '96');
-                await page.waitForTimeout(2000);
+                await page.waitForTimeout(3000);
             }
 
-            let pageNum = 1;
+            const totalPages = await detectTotalPages(page);
+            console.log(`📚 Total pages detected: ${totalPages}`);
 
-            while (true) {
-                console.log(`⏳ Scraping page ${pageNum}...`);
+            for (let currentPage = 1; currentPage <= totalPages; currentPage++) {
+                if (currentPage > 1) {
+                    console.log(`➡️ Navigating to page ${currentPage}...`);
+
+                    try {
+                        await goToPageNumber(page, currentPage);
+                    } catch (err) {
+                        console.log(`⚠️ Failed to navigate to page ${currentPage}: ${err.message}`);
+                        break;
+                    }
+                }
+
+                console.log(`⏳ Scraping page ${currentPage}...`);
                 await page.waitForSelector('div.css-8jxzx-gridContainer', { timeout: 60000 });
-                await page.waitForTimeout(5000);
+                await page.waitForTimeout(3000);
 
                 const products = await page.$$(
                     'div.css-8jxzx-gridContainer > div:not([data-test])'
@@ -249,10 +355,7 @@ async function selectTomorrowOrNextAvailable(page) {
                     const name = lines[0] || '';
 
                     const code = await product
-                        .$eval(
-                            'div.css-1l9y2wl-itemCode',
-                            el => el.textContent?.trim() || ''
-                        )
+                        .$eval('div.css-1l9y2wl-itemCode', el => el.textContent?.trim() || '')
                         .catch(() => '');
 
                     const variety = 'N/a';
@@ -316,9 +419,7 @@ async function selectTomorrowOrNextAvailable(page) {
                             'select.MuiNativeSelect-select',
                             select => {
                                 const selectedOption = select.options[select.selectedIndex];
-                                return selectedOption
-                                    ? selectedOption.textContent.trim()
-                                    : 'N/A';
+                                return selectedOption ? selectedOption.textContent.trim() : 'N/A';
                             }
                         );
                     } catch {
@@ -339,25 +440,6 @@ async function selectTomorrowOrNextAvailable(page) {
                         getUaeTimeFormatted(),
                     ]);
                 }
-
-                const nextBtn = page.locator('button[aria-label="Go to next page"]').first();
-
-                if (!(await nextBtn.count())) {
-                    console.log('⛔ Next button not found, stopping.');
-                    break;
-                }
-
-                const disabled = await nextBtn.getAttribute('disabled');
-                if (disabled !== null) {
-                    console.log('✅ Last page reached.');
-                    break;
-                }
-
-                console.log('➡️ Moving to next page...');
-                await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
-                await nextBtn.click({ force: true });
-                await page.waitForTimeout(5000);
-                pageNum++;
             }
         }
 
