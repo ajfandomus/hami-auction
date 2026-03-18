@@ -42,6 +42,104 @@ function formatRuntime(ms) {
     return m === 0 ? `${s}s` : `${m}m ${s % 60}s`;
 }
 
+function getTomorrowDateUAE() {
+    const now = new Date();
+    const uaeNow = new Date(
+        now.toLocaleString('en-US', { timeZone: 'Asia/Dubai' })
+    );
+
+    uaeNow.setDate(uaeNow.getDate() + 1);
+
+    const year = uaeNow.getFullYear();
+    const month = String(uaeNow.getMonth() + 1).padStart(2, '0');
+    const day = String(uaeNow.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+}
+
+async function openCalendarIfNeeded(page) {
+    // If calendar already visible, do nothing
+    const alreadyVisible = await page.$('table.rdp-month_grid');
+    if (alreadyVisible) return true;
+
+    // Try a few common selectors for date picker trigger
+    const triggerSelectors = [
+        'button[aria-label*="calendar" i]',
+        'button[aria-label*="date" i]',
+        'input[placeholder*="date" i]',
+        'input[aria-label*="date" i]',
+        '[data-testid*="date"]',
+        '[data-test*="date"]',
+        'svg[data-testid*="Calendar"]',
+        '.MuiInputAdornment-root button',
+    ];
+
+    for (const selector of triggerSelectors) {
+        try {
+            const el = await page.$(selector);
+            if (el && (await el.isVisible())) {
+                await el.click();
+                await page.waitForTimeout(1500);
+
+                const calendar = await page.$('table.rdp-month_grid');
+                if (calendar) return true;
+            }
+        } catch { }
+    }
+
+    // One more attempt: click inside any visible date input
+    try {
+        const dateInput = await page.locator('input').filter({ hasText: '' }).first();
+        if (await dateInput.isVisible().catch(() => false)) {
+            await dateInput.click();
+            await page.waitForTimeout(1500);
+
+            const calendar = await page.$('table.rdp-month_grid');
+            if (calendar) return true;
+        }
+    } catch { }
+
+    return false;
+}
+
+async function selectTomorrowOrNextAvailable(page) {
+    const isOpened = await openCalendarIfNeeded(page);
+    if (!isOpened) {
+        throw new Error('❌ Could not open calendar');
+    }
+
+    await page.waitForSelector('td.rdp-day', { timeout: 20000 });
+
+    const tomorrow = getTomorrowDateUAE();
+    console.log(`📅 Tomorrow target (UAE): ${tomorrow}`);
+
+    const nextAvailable = await page.$$eval(
+        'td.rdp-day:not(.rdp-disabled)',
+        (days, tomorrowDate) => {
+            const validDates = days
+                .map(day => day.getAttribute('data-day'))
+                .filter(Boolean)
+                .sort();
+
+            return validDates.find(d => d >= tomorrowDate) || null;
+        },
+        tomorrow
+    );
+
+    if (!nextAvailable) {
+        throw new Error('❌ No available future dates found in calendar');
+    }
+
+    console.log(`✅ Picking date: ${nextAvailable}`);
+
+    const btnSelector = `td[data-day="${nextAvailable}"]:not(.rdp-disabled) button`;
+    await page.waitForSelector(btnSelector, { timeout: 10000 });
+    await page.click(btnSelector);
+    await page.waitForTimeout(3000);
+
+    return nextAvailable;
+}
+
 (async () => {
     const startTime = Date.now();
 
@@ -54,22 +152,13 @@ function formatRuntime(ms) {
     }
 
     // ---------- GOOGLE SHEETS ----------
-    // const serviceAccountPath =
-    //     process.env.GOOGLE_SERVICE_ACCOUNT_JSON || 'service-account.json';
-    // const serviceAccount = JSON.parse(
-    //     fs.readFileSync(path.resolve(__dirname, serviceAccountPath), 'utf8')
-    // );
+    const serviceAccount = JSON.parse(process.env.FLORIDAY_SERVICE_ACCOUNT);
 
-    // const auth = new google.auth.GoogleAuth({
-    //     credentials: serviceAccount,
-    //     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    // });
-const serviceAccount = JSON.parse(process.env.FLORIDAY_SERVICE_ACCOUNT);
+    const auth = new google.auth.GoogleAuth({
+        credentials: serviceAccount,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
 
-const auth = new google.auth.GoogleAuth({
-    credentials: serviceAccount,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
     const sheets = google.sheets({ version: 'v4', auth });
     const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
     const TARGET_SHEET_NAME = 'Hami-auction';
@@ -117,6 +206,13 @@ const auth = new google.auth.GoogleAuth({
                 }
             } catch { }
 
+            // ---------- PICK TOMORROW OR NEXT AVAILABLE DATE ----------
+            try {
+                const selectedDate = await selectTomorrowOrNextAvailable(page);
+                console.log(`📌 Date selected successfully: ${selectedDate}`);
+            } catch (err) {
+                console.log(`⚠️ Date selection skipped/failed: ${err.message}`);
+            }
 
             // --- set page size to 96 ---
             const pageSizeSelect = await page.$('select.css-hh3ke9-pageSizeDropDownList');
@@ -125,137 +221,134 @@ const auth = new google.auth.GoogleAuth({
                 await page.waitForTimeout(2000);
             }
 
-
-
             let pageNum = 1;
 
             while (true) {
-            console.log(`⏳ Scraping page ${pageNum}...`);
-            await page.waitForSelector('div.css-8jxzx-gridContainer',{ timeout: 60000 });
-            await page.waitForTimeout(5000);
-            const products = await page.$$(
-                'div.css-8jxzx-gridContainer > div:not([data-test])'
-            );
-console.log('🧪 Products found:', products.length);
-            for (const product of products) {
-                const img = await product
-                    .$eval('.css-16275sc-imageContainer img', el => el.src)
-                    .catch(() => '');
+                console.log(`⏳ Scraping page ${pageNum}...`);
+                await page.waitForSelector('div.css-8jxzx-gridContainer', { timeout: 60000 });
+                await page.waitForTimeout(5000);
 
-                const details = await product
-                    .$eval('.css-dcgd6i-itemDetails', el => el.innerText.trim())
-                    .catch(() => '');
+                const products = await page.$$(
+                    'div.css-8jxzx-gridContainer > div:not([data-test])'
+                );
 
-                const lines = details.split('\n').map(l => l.trim());
-                const name = lines[0] || '';
-               
-                const code = await product
-                    .$eval('div.css-1l9y2wl-itemCode', el => el.textContent?.trim() || '')
-                    .catch(() => '');
+                console.log('🧪 Products found:', products.length);
 
-                  const variety =  'N/a';
-                const packingCode = await product
-                    .$eval(
-                        'div[style*="white-space: nowrap"] > div',
-                        el => el.textContent.split(' - ')[0]
-                    )
-                    .catch(() => '');
+                for (const product of products) {
+                    const img = await product
+                        .$eval('.css-16275sc-imageContainer img', el => el.src)
+                        .catch(() => '');
 
-                // // Quantity & Price
-                // let Quantity = '';
-                // try {
-                //     const containerText = await product.$eval('div.MuiStack-root.css-8gnj0l', el => el.innerText?.trim() || '');
-                //     const packagesMatch = containerText.match(/(\d+)\s*packages/i);
-                //     const qty = packagesMatch ? packagesMatch[1] : '';
+                    const details = await product
+                        .$eval('.css-dcgd6i-itemDetails', el => el.innerText.trim())
+                        .catch(() => '');
 
-                //     const price = await product.$eval('div.MuiStack-root.css-8gnj0l b', el => el.innerText?.trim() || '');
-                //     const priceOnly = price.replace('€', '').trim();
+                    const lines = details.split('\n').map(l => l.trim());
+                    const name = lines[0] || '';
 
-                //     if (priceOnly) Quantity = qty ? `${qty} * €${priceOnly}` : `€${priceOnly}`;
-                // } catch { }
+                    const code = await product
+                        .$eval(
+                            'div.css-1l9y2wl-itemCode',
+                            el => el.textContent?.trim() || ''
+                        )
+                        .catch(() => '');
 
-let price = '';
-let Quantity = '';
+                    const variety = 'N/a';
 
-try {
-    const container = await product.$('div.MuiStack-root.css-8gnj0l');
+                    const packingCode = await product
+                        .$eval(
+                            'div[style*="white-space: nowrap"] > div',
+                            el => el.textContent.split(' - ')[0]
+                        )
+                        .catch(() => '');
 
-    if (container) {
-        // Get price from <b>
-        const priceRaw = await container.$eval('b', el => el.innerText.trim());
-        price = priceRaw.replace('€', '').trim();
+                    let price = '';
+                    let Quantity = '';
 
-        // Check if quantity exists in <span>
-        const qtyRaw = await container.$eval('span', el => el.innerText.trim()).catch(() => null);
+                    try {
+                        const container = await product.$('div.MuiStack-root.css-8gnj0l');
 
-        if (qtyRaw) {
-            // Extract just the number from "12 packages"
-            const qtyNumber = qtyRaw.match(/\d+/)?.[0] || '1';
-            Quantity = `${qtyNumber} * €${price}`;
-        } else {
-            Quantity = `€${price}`;
-        }
-    }
-} catch {
-    price = '';
-    Quantity = '';
-}
+                        if (container) {
+                            const priceRaw = await container.$eval(
+                                'b',
+                                el => el.innerText.trim()
+                            );
+                            price = priceRaw.replace('€', '').trim();
 
-      
-                const farmName = await product
-                    .$eval(
-                        'div.MuiStack-root.css-173yoy4 img',
-                        el => el.alt || ''
-                    )
-                    .catch(() => '');
+                            const qtyRaw = await container
+                                .$eval('span', el => el.innerText.trim())
+                                .catch(() => null);
 
-                const characteristics = [];
-                try {
-                    const spans = await product.$$(
-                        'div.css-1cvv3s4-characteristics span'
-                    );
-                    for (const s of spans) {
-                        characteristics.push(
-                            await s.evaluate(el => el.textContent.trim())
-                        );
-                    }
-                } catch { }
-
-                let helper = 'N/A';
-
-                try {
-                    helper = await product.$eval(
-                        'select.MuiNativeSelect-select',
-                        select => {
-                            const selectedOption = select.options[select.selectedIndex];
-                            return selectedOption ? selectedOption.textContent.trim() : 'N/A';
+                            if (qtyRaw) {
+                                const qtyNumber = qtyRaw.match(/\d+/)?.[0] || '1';
+                                Quantity = `${qtyNumber} * €${price}`;
+                            } else {
+                                Quantity = `€${price}`;
+                            }
                         }
-                    );
-                } catch {
-                    // dropdown not present for this product
-                    helper = 'N/A';
-                }
+                    } catch {
+                        price = '';
+                        Quantity = '';
+                    }
 
-                allProducts.push([
-                    name,
-                    variety,
-                    code,
-                    packingCode,
-                    price,
-                    img,
-                    Quantity,
-                    farmName,
-                    characteristics.join(' | '),
-                    helper,
-                    getUaeTimeFormatted(),
-                ]);
-            }
+                    const farmName = await product
+                        .$eval(
+                            'div.MuiStack-root.css-173yoy4 img',
+                            el => el.alt || ''
+                        )
+                        .catch(() => '');
+
+                    const characteristics = [];
+                    try {
+                        const spans = await product.$$(
+                            'div.css-1cvv3s4-characteristics span'
+                        );
+                        for (const s of spans) {
+                            characteristics.push(
+                                await s.evaluate(el => el.textContent.trim())
+                            );
+                        }
+                    } catch { }
+
+                    let helper = 'N/A';
+
+                    try {
+                        helper = await product.$eval(
+                            'select.MuiNativeSelect-select',
+                            select => {
+                                const selectedOption =
+                                    select.options[select.selectedIndex];
+                                return selectedOption
+                                    ? selectedOption.textContent.trim()
+                                    : 'N/A';
+                            }
+                        );
+                    } catch {
+                        helper = 'N/A';
+                    }
+
+                    allProducts.push([
+                        name,
+                        variety,
+                        code,
+                        packingCode,
+                        price,
+                        img,
+                        Quantity,
+                        farmName,
+                        characteristics.join(' | '),
+                        helper,
+                        getUaeTimeFormatted(),
+                    ]);
+                }
 
                 const nextBtn = await page.$(
                     'button[aria-label="Go to next page"]'
                 );
-                if (!nextBtn || (await nextBtn.getAttribute('disabled')) !== null)
+
+                if (!nextBtn || (await nextBtn.getAttribute('disabled')) !== null) {
                     break;
+                }
 
                 await nextBtn.click();
                 await page.waitForTimeout(4000);
@@ -300,6 +393,3 @@ try {
         if (browser) await browser.close();
     }
 })();
-
-
-
