@@ -440,6 +440,23 @@ try {
         });
 
         await sheets.spreadsheets.values.update({
+            // ---------- STATUS UPDATE ----------
+const endTime = Date.now();
+const runtime = formatRuntime(endTime - startTime);
+const nowFormatted = getUaeTimeFormatted();
+
+const statusText = `✅ ${nowFormatted} — ${runtime}`;
+
+await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${TARGET_SHEET_NAME}!F16`,
+    valueInputOption: 'RAW',
+    requestBody: {
+        values: [[statusText]],
+    },
+});
+
+console.log(`📌 Status updated in F16: ${statusText}`);
             spreadsheetId: SPREADSHEET_ID,
             range: `${TARGET_SHEET_NAME}!A1`,
             valueInputOption: 'RAW',
