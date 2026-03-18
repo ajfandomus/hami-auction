@@ -165,46 +165,35 @@ async function selectTomorrowOrNextAvailable(page) {
     return nextAvailable;
 }
 
-async function detectTotalPages(page) {
-    try {
-        const pageNumbers = await page
-            .locator('button[aria-label^="Go to page "]')
-            .evaluateAll((buttons) => {
-                return buttons
-                    .map(btn => {
-                        const label = btn.getAttribute('aria-label') || '';
-                        const match = label.match(/Go to page (\d+)/i);
-                        return match ? Number(match[1]) : null;
-                    })
-                    .filter(Boolean);
-            });
+async function goToNextPage(page) {
+    const nextBtn = page.locator('button[aria-label="Go to next page"]').first();
 
-        if (pageNumbers.length) {
-            return Math.max(...pageNumbers);
-        }
-    } catch {}
+    if (!(await nextBtn.count())) {
+        return false;
+    }
 
-    return 1;
-}
+    const isDisabled =
+        (await nextBtn.getAttribute('disabled')) !== null ||
+        (await nextBtn.getAttribute('aria-disabled')) === 'true' ||
+        ((await nextBtn.getAttribute('class')) || '').includes('Mui-disabled');
 
-async function goToPageNumber(page, pageNumber) {
+    if (isDisabled) {
+        return false;
+    }
+
     const firstCardBefore = await page
         .locator('div.css-8jxzx-gridContainer > div:not([data-test])')
         .first()
         .textContent()
         .catch(() => '');
 
-    const pageBtn = page.locator(`button[aria-label="Go to page ${pageNumber}"]`).first();
-
-    if (!(await pageBtn.count())) {
-        throw new Error(`Page button ${pageNumber} not found`);
-    }
-
-    await pageBtn.scrollIntoViewIfNeeded().catch(() => {});
-    await pageBtn.click({ force: true });
+    await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await nextBtn.click({ force: true });
 
     await waitForGridRefresh(page, firstCardBefore);
     await page.waitForTimeout(2000);
+
+    return true;
 }
 
 (async () => {
@@ -307,21 +296,9 @@ async function goToPageNumber(page, pageNumber) {
                 await page.waitForTimeout(3000);
             }
 
-            const totalPages = await detectTotalPages(page);
-            console.log(`📚 Total pages detected: ${totalPages}`);
+            let currentPage = 1;
 
-            for (let currentPage = 1; currentPage <= totalPages; currentPage++) {
-                if (currentPage > 1) {
-                    console.log(`➡️ Navigating to page ${currentPage}...`);
-
-                    try {
-                        await goToPageNumber(page, currentPage);
-                    } catch (err) {
-                        console.log(`⚠️ Failed to navigate to page ${currentPage}: ${err.message}`);
-                        break;
-                    }
-                }
-
+            while (true) {
                 console.log(`⏳ Scraping page ${currentPage}...`);
                 await page.waitForSelector('div.css-8jxzx-gridContainer', { timeout: 60000 });
                 await page.waitForTimeout(3000);
@@ -430,6 +407,16 @@ async function goToPageNumber(page, pageNumber) {
                         getUaeTimeFormatted(),
                     ]);
                 }
+
+                const moved = await goToNextPage(page);
+
+                if (!moved) {
+                    console.log('✅ Last page reached.');
+                    break;
+                }
+
+                currentPage++;
+                console.log(`➡️ Moving to next page ${currentPage}...`);
             }
         }
 
