@@ -62,7 +62,6 @@ async function openCalendarIfNeeded(page) {
         return true;
     }
 
-    // Exact opener from your snippet
     const exactOpeners = [
         'div.MuiPickersInputBase-root button.MuiIconButton-root',
         'div.MuiPickersInputBase-root .MuiInputAdornment-positionEnd button',
@@ -73,8 +72,9 @@ async function openCalendarIfNeeded(page) {
         try {
             const btn = page.locator(selector).first();
             if (await btn.count()) {
+                await btn.scrollIntoViewIfNeeded().catch(() => {});
                 await btn.click({ force: true });
-                await page.waitForTimeout(1200);
+                await page.waitForTimeout(1500);
 
                 if (await visibleCalendar.count()) {
                     return true;
@@ -83,12 +83,12 @@ async function openCalendarIfNeeded(page) {
         } catch {}
     }
 
-    // fallback: click picker root itself
     try {
         const pickerRoot = page.locator('div.MuiPickersInputBase-root').first();
         if (await pickerRoot.count()) {
+            await pickerRoot.scrollIntoViewIfNeeded().catch(() => {});
             await pickerRoot.click({ force: true });
-            await page.waitForTimeout(1200);
+            await page.waitForTimeout(1500);
 
             if (await visibleCalendar.count()) {
                 return true;
@@ -135,8 +135,9 @@ async function selectTomorrowOrNextAvailable(page) {
     ).first();
 
     await targetBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await targetBtn.scrollIntoViewIfNeeded().catch(() => {});
     await targetBtn.click({ force: true });
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(3000);
 
     return nextAvailable;
 }
@@ -339,14 +340,23 @@ async function selectTomorrowOrNextAvailable(page) {
                     ]);
                 }
 
-                const nextBtn = await page.$('button[aria-label="Go to next page"]');
+                const nextBtn = page.locator('button[aria-label="Go to next page"]').first();
 
-                if (!nextBtn || (await nextBtn.getAttribute('disabled')) !== null) {
+                if (!(await nextBtn.count())) {
+                    console.log('⛔ Next button not found, stopping.');
                     break;
                 }
 
-                await nextBtn.click();
-                await page.waitForTimeout(4000);
+                const disabled = await nextBtn.getAttribute('disabled');
+                if (disabled !== null) {
+                    console.log('✅ Last page reached.');
+                    break;
+                }
+
+                console.log('➡️ Moving to next page...');
+                await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+                await nextBtn.click({ force: true });
+                await page.waitForTimeout(5000);
                 pageNum++;
             }
         }
