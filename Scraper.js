@@ -1,8 +1,6 @@
 const { google } = require('googleapis');
 const dotenv = require('dotenv');
 const { firefox } = require('playwright');
-const fs = require('fs');
-const path = require('path');
 
 dotenv.config();
 
@@ -31,9 +29,7 @@ function getUaeTimeFormatted() {
         minute: '2-digit',
         second: '2-digit',
         hour12: false,
-    })
-        .format(new Date())
-        .replace(',', '');
+    }).format(new Date()).replace(',', '');
 }
 
 function formatRuntime(ms) {
@@ -44,9 +40,7 @@ function formatRuntime(ms) {
 
 function getTomorrowDateUAE() {
     const now = new Date();
-    const uaeNow = new Date(
-        now.toLocaleString('en-US', { timeZone: 'Asia/Dubai' })
-    );
+    const uaeNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Dubai' }));
 
     uaeNow.setDate(uaeNow.getDate() + 1);
 
@@ -124,7 +118,7 @@ async function selectTomorrowOrNextAvailable(page) {
     await calendar.waitFor({ state: 'visible', timeout: 15000 });
 
     const tomorrow = getTomorrowDateUAE();
-    console.log(`📅 Tomorrow target (UAE): ${tomorrow}`);
+    console.log(`📅 Tomorrow target UAE: ${tomorrow}`);
 
     const nextAvailable = await calendar
         .locator('td.rdp-day:not(.rdp-disabled):not(.rdp-hidden):not(.rdp-outside) button')
@@ -168,18 +162,14 @@ async function selectTomorrowOrNextAvailable(page) {
 async function goToNextPage(page) {
     const nextBtn = page.locator('button[aria-label="Go to next page"]').first();
 
-    if (!(await nextBtn.count())) {
-        return false;
-    }
+    if (!(await nextBtn.count())) return false;
 
     const isDisabled =
         (await nextBtn.getAttribute('disabled')) !== null ||
         (await nextBtn.getAttribute('aria-disabled')) === 'true' ||
         ((await nextBtn.getAttribute('class')) || '').includes('Mui-disabled');
 
-    if (isDisabled) {
-        return false;
-    }
+    if (isDisabled) return false;
 
     const firstCardBefore = await page
         .locator('div.css-8jxzx-gridContainer > div:not([data-test])')
@@ -207,18 +197,6 @@ async function goToNextPage(page) {
         process.exit(1);
     }
 
-    // ---------- GOOGLE SHEETS ----------
-    // const serviceAccountPath =
-    //     process.env.GOOGLE_SERVICE_ACCOUNT_JSON || 'service-account.json';
-    // const serviceAccount = JSON.parse(
-    //     fs.readFileSync(path.resolve(__dirname, serviceAccountPath), 'utf8')
-    // );
-
-    // const auth = new google.auth.GoogleAuth({
-    //     credentials: serviceAccount,
-    //     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    // });
-
     const serviceAccount = JSON.parse(process.env.FLORIDAY_SERVICE_ACCOUNT);
 
     const auth = new google.auth.GoogleAuth({
@@ -235,9 +213,11 @@ async function goToNextPage(page) {
 
     try {
         browser = await firefox.launch({ headless: true, slowMo: 100 });
+
         const context = await browser.newContext({
             viewport: { width: 1280, height: 800 },
         });
+
         const page = await context.newPage();
         page.setDefaultTimeout(120000);
 
@@ -256,7 +236,7 @@ async function goToNextPage(page) {
             await page.waitForTimeout(6000);
         }
 
-        // ---------- STATUS: RUNNING ----------
+        // ---------- STATUS RUNNING ----------
         await sheets.spreadsheets.values.update({
             spreadsheetId: SPREADSHEET_ID,
             range: `${STATUS_SHEET_NAME}!F16`,
@@ -266,25 +246,31 @@ async function goToNextPage(page) {
             },
         });
 
-        // ---------- SCRAPING ----------
         const allProducts = [];
 
-        for (const target of TARGET_PAGES) {
-            console.log(`🚀 Navigating to: ${target.url}`);
-            await page.goto(target.url, { waitUntil: 'domcontentloaded' });
+        // ✅ FIXED LOOP
+        for (const targetUrl of TARGET_PAGES) {
+            console.log(`🚀 Navigating to: ${targetUrl}`);
+
+            if (!targetUrl || typeof targetUrl !== 'string') {
+                console.log('⚠️ Skipping invalid target URL:', targetUrl);
+                continue;
+            }
+
+            await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             await page.waitForTimeout(10000);
 
             try {
                 const gotItBtn = await page.$(
                     'div.MuiDialogActions-root button:has-text("Got it")'
                 );
+
                 if (gotItBtn && (await gotItBtn.isVisible())) {
                     await gotItBtn.click();
                     await page.waitForTimeout(5000);
                 }
             } catch {}
 
-            // ---------- DATE SELECTION ----------
             let selectedDate = null;
 
             try {
@@ -296,11 +282,9 @@ async function goToNextPage(page) {
                 continue;
             }
 
-            // only scrape after date selection succeeded
             await page.waitForSelector('div.css-8jxzx-gridContainer', { timeout: 60000 });
             await page.waitForTimeout(2000);
 
-            // --- set page size to 96 ---
             const pageSizeSelect = await page.$('select.css-hh3ke9-pageSizeDropDownList');
             if (pageSizeSelect) {
                 await page.selectOption('select.css-hh3ke9-pageSizeDropDownList', '96');
@@ -311,7 +295,11 @@ async function goToNextPage(page) {
 
             while (true) {
                 console.log(`⏳ Scraping page ${currentPage}...`);
-                await page.waitForSelector('div.css-8jxzx-gridContainer', { timeout: 60000 });
+
+                await page.waitForSelector('div.css-8jxzx-gridContainer', {
+                    timeout: 60000,
+                });
+
                 await page.waitForTimeout(3000);
 
                 const products = await page.$$(
@@ -351,32 +339,24 @@ async function goToNextPage(page) {
                     try {
                         const container = await product.$('div.MuiStack-root.css-8gnj0l');
 
-                        if (!container) {
-                            continue;
-                        }
+                        if (!container) continue;
 
                         const qtyRaw = await container
                             .$eval('span', el => el.innerText.trim())
                             .catch(() => null);
 
-                        if (!qtyRaw || !/packages?/i.test(qtyRaw)) {
-                            continue;
-                        }
+                        if (!qtyRaw || !/packages?/i.test(qtyRaw)) continue;
 
                         const priceRaw = await container
                             .$eval('b', el => el.innerText.trim())
                             .catch(() => '');
 
-                        if (!priceRaw) {
-                            continue;
-                        }
+                        if (!priceRaw) continue;
 
                         price = priceRaw.replace('€', '').trim();
 
                         const qtyNumber = qtyRaw.match(/\d+/)?.[0];
-                        if (!qtyNumber) {
-                            continue;
-                        }
+                        if (!qtyNumber) continue;
 
                         Quantity = `${qtyNumber} * €${price}`;
                     } catch {
@@ -384,17 +364,14 @@ async function goToNextPage(page) {
                     }
 
                     const farmName = await product
-                        .$eval(
-                            'div.MuiStack-root.css-173yoy4 img',
-                            el => el.alt || ''
-                        )
+                        .$eval('div.MuiStack-root.css-173yoy4 img', el => el.alt || '')
                         .catch(() => '');
 
                     const characteristics = [];
+
                     try {
-                        const spans = await product.$$(
-                            'div.css-1cvv3s4-characteristics span'
-                        );
+                        const spans = await product.$$('div.css-1cvv3s4-characteristics span');
+
                         for (const s of spans) {
                             characteristics.push(
                                 await s.evaluate(el => el.textContent.trim())
@@ -409,7 +386,9 @@ async function goToNextPage(page) {
                             'select.MuiNativeSelect-select',
                             select => {
                                 const selectedOption = select.options[select.selectedIndex];
-                                return selectedOption ? selectedOption.textContent.trim() : 'N/A';
+                                return selectedOption
+                                    ? selectedOption.textContent.trim()
+                                    : 'N/A';
                             }
                         );
                     } catch {
@@ -473,7 +452,6 @@ async function goToNextPage(page) {
             },
         });
 
-        // ---------- STATUS UPDATE ----------
         const endTime = Date.now();
         const runtime = formatRuntime(endTime - startTime);
         const nowFormatted = getUaeTimeFormatted();
@@ -496,15 +474,6 @@ async function goToNextPage(page) {
         try {
             const failRuntime = formatRuntime(Date.now() - startTime);
             const failText = `❌ ${getUaeTimeFormatted()} — ${failRuntime} — ${err.message}`;
-
-            const serviceAccount = JSON.parse(process.env.FLORIDAY_SERVICE_ACCOUNT);
-            const auth = new google.auth.GoogleAuth({
-                credentials: serviceAccount,
-                scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-            });
-            const sheets = google.sheets({ version: 'v4', auth });
-            const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
-            const STATUS_SHEET_NAME = '_config';
 
             await sheets.spreadsheets.values.update({
                 spreadsheetId: SPREADSHEET_ID,
