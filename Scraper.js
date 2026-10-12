@@ -337,7 +337,7 @@ async function goToNextPage(page) {
                     let Quantity = '';
 
                     try {
-                        const container = await product.$('div.MuiStack-root.css-8gnj0l');
+                        const container = await product.$('div.MuiStack-root.css-1hw0pqm');
 
                         if (!container) continue;
 
